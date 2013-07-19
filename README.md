@@ -4,8 +4,14 @@ tfoecho
 Test code for TCP Fast Open
 
 ## TCP Fast Open
+
 TCP Fast Open is an extension to TCP Protocol which enables to transfer data in SYN packets.
 For more details, read an LWN article: http://lwn.net/Articles/508865/
+
+## Requirements
+
+- Linux 3.7 or later
+- C++11 compliant compiler
 
 ## Build
 
@@ -15,6 +21,7 @@ For more details, read an LWN article: http://lwn.net/Articles/508865/
 ## Run
 
 Before running:
+
 Make sure to enable TCP Fast open on both sides:
 
     sudo sysctl -w net.ipv4.tcp_fastopen=3

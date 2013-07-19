@@ -14,6 +14,11 @@ For more details, read an LWN article: http://lwn.net/Articles/508865/
 
 ## Run
 
+Before running:
+Make sure to enable TCP Fast open on both sides:
+
+    sudo sysctl -w net.ipv4.tcp_fastopen=3
+
 On server:
 
     ./server

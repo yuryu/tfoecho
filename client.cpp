@@ -39,23 +39,38 @@ int getsock(const std::string &server_addr, const std::vector<char> &msg_to_send
     struct addrinfo *rp; 
     for( rp = res; rp != NULL; rp = rp->ai_next )
     {
+        // Need to create the socket again when EINTR is returned
+redo:
         sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if( sock == -1 ) continue;
+        if( sock == -1 )
+            continue;
         ssize_t r = sendto(sock, &msg_to_send[0], msg_to_send.size(),
                 MSG_FASTOPEN, rp->ai_addr, rp->ai_addrlen);
+        if( r == -1 && errno == EINTR )
+        {
+            close(sock);
+            goto redo;
+        }
+        // Exit the loop when sendto succeeded
         if( r != -1 )
             break;
+        // Try without TCP FastOpen
         r = connect(sock, rp->ai_addr, rp->ai_addrlen);
+        if( r == -1 && errno == EINTR )
+        {
+            close(sock);
+            goto redo;
+        }
         if( r != -1 )
         {
-            r = send(sock, &msg_to_send[0], msg_to_send.size(), 0);
-            if( r == -1 )
+            ssize_t sent;
+            do
             {
-                close(sock);
-                cerror("send");
-                std::exit(EXIT_FAILURE);
-            }
-            break;
+                sent = send(sock, &msg_to_send[0], msg_to_send.size(), 0);
+            } while( sent == -1 && sent == EINTR );
+            // Success
+            if( r != -1 )
+                break;
         }
         close(sock);
     }
@@ -68,7 +83,7 @@ int getsock(const std::string &server_addr, const std::vector<char> &msg_to_send
     return sock;
 }
 
-void send_recv(const std::string &server_addr, int msg_size, std::atomic_int &count)
+void send_recv(const std::string &server_addr, const int msg_size, std::atomic_int &count)
 {
     std::vector<char> msg_buf(msg_size), recv_buf(msg_size);
     
@@ -79,25 +94,26 @@ void send_recv(const std::string &server_addr, int msg_size, std::atomic_int &co
     while( count-- > 0 )
     {
         std::generate(msg_buf.begin(), msg_buf.end(), generator);
-        int sock = getsock(server_addr, msg_buf);
+        FD sock(getsock(server_addr, msg_buf));
         shutdown(sock, SHUT_WR);
         ssize_t read_bytes = 0;
-        while( read_bytes != recv_buf.size() )
+        while( read_bytes != msg_size )
         {
-            ssize_t r = recv(sock, &recv_buf[read_bytes], recv_buf.size() - read_bytes, 0);
-            if( r == 0 ) break;
-            if( r != -1 )
+            ssize_t r;
+            do
             {
-                read_bytes += r;
-                continue;
+                r = recv(sock, &recv_buf[read_bytes], recv_buf.size() - read_bytes, 0);
+            } while( r == -1 && errno == EINTR );
+            if( r == 0 ) break;
+            if( r == -1 )
+            {
+                cerror("recv");
+                std::exit(EXIT_FAILURE);
             }
-            if( errno == EINTR ) continue;
-            cerror("recv");
-            std::exit(EXIT_FAILURE);
+            read_bytes += r;
         }
         if( msg_buf != recv_buf )
             std::cerr << "Receive mismatch." << std::endl;
-        close(sock);
     }
 }
 

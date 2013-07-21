@@ -79,13 +79,13 @@ int accept_and_register(int sfd, int epollfd)
     do
     {
         s = accept4(sfd, &addr, &addrlen, SOCK_NONBLOCK);
-        if( s == -1 )
-        {
-            if( errno == EINTR ) continue;
-            cerror("accept");
-            std::exit(EXIT_FAILURE);
-        }
-    } while( 0 );
+    } while( s == -1 && errno == EINTR );
+    if( s == -1 )
+    {
+        cerror("accept");
+        std::exit(EXIT_FAILURE);
+    }
+
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = s;
@@ -110,21 +110,21 @@ void process_client_socket(int s, int epollfd)
             cerror("recv");
             break;
         }
+        ssize_t sent;
+        // EAGAIN or EWOULDBLOCK is retuned when the socket buffer is full
+        // We should try with another socket for maximum performance, however,
+        // we just wait until the buffer becomes available as we don't have
+        // enough buffer for that.
         do {
-            if( send(s, &buf[0], rs, 0) == -1 )
-            {
-                // EAGAIN or EWOULDBLOCK is retuned when the socket buffer is full
-                // We should try with another socket for maximum performance, however,
-                // we just wait until the buffer becomes available as we don't have
-                // enough buffer for that.
-                if( errno == EINTR || 
-                        errno == EAGAIN || errno == EWOULDBLOCK ) continue;
-                cerror("send");
-                goto close_socket;
-            }
-        } while( 0 );
+            sent = send(s, &buf[0], rs, 0);
+        } while( sent == -1 && 
+                 (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) );
+        if( sent == -1 )
+        {
+            cerror("send");
+            break;
+        }
     }
-close_socket:
     if( epoll_ctl(epollfd, EPOLL_CTL_DEL, s, NULL) == -1 )
         cerror("epoll_ctl: EPOLL_CTL_DEL");
     close(s);

@@ -7,7 +7,7 @@ TARGETS = client server
 all: $(TARGETS)
 
 client: client.cpp common.h
-	$(CXX) $(CXXFLAGS) -o $@ $<
+	$(CXX) $(CXXFLAGS) -pthread -o $@ $<
 
 server: server.cpp common.h
 	$(CXX) $(CXXFLAGS) -o $@ $<

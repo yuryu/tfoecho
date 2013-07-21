@@ -9,11 +9,15 @@
 #include <functional>
 #include <limits>
 #include <algorithm>
+#include <thread>
+#include <atomic>
 
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+
+#include "common.h"
 
 #define SERVER_PORT "32345"
 
@@ -28,7 +32,7 @@ int getsock(const std::string &server_addr, const std::vector<char> &msg_to_send
     int e = getaddrinfo(server_addr.c_str(), SERVER_PORT, &hint, &res);
     if( e == -1 )
     {
-        std::cerr << "getaddrinfo:" << strerror(errno) << std::endl;
+        cerror("getaddrinfo");
         std::exit(EXIT_FAILURE);
     }
     int sock;
@@ -48,7 +52,7 @@ int getsock(const std::string &server_addr, const std::vector<char> &msg_to_send
             if( r == -1 )
             {
                 close(sock);
-                std::cerr << "send" << strerror(errno) << std::endl;
+                cerror("send");
                 std::exit(EXIT_FAILURE);
             }
             break;
@@ -58,30 +62,21 @@ int getsock(const std::string &server_addr, const std::vector<char> &msg_to_send
     freeaddrinfo(res);
     if( rp == NULL )
     {
-        std::cerr << "Couldn't get socket." << std::endl;
+        std::cerr << "Couldn't get a socket." << std::endl;
         std::exit(EXIT_FAILURE);
     }
     return sock;
 }
 
-int main(int argc, char *argv[])
+void send_recv(const std::string &server_addr, int msg_size, std::atomic_int &count)
 {
-    if( argc <= 3 )
-    {
-        std::cerr << "Usage: client [server addr] [msg size] [count]" << std::endl;
-        return EXIT_FAILURE;
-    }
-    
-    std::string server_addr(argv[1]);
-    int msg_size = std::atoi(argv[2]);
-    int count = std::atoi(argv[3]);
     std::vector<char> msg_buf(msg_size), recv_buf(msg_size);
     
     std::mt19937 rand_engine;
     std::uniform_int_distribution<char> distribution(
         std::numeric_limits<char>::min(), std::numeric_limits<char>::max());
     auto generator = std::bind(distribution, rand_engine);
-    for( int i = 0; i < count; ++i )
+    while( count-- > 0 )
     {
         std::generate(msg_buf.begin(), msg_buf.end(), generator);
         int sock = getsock(server_addr, msg_buf);
@@ -97,7 +92,7 @@ int main(int argc, char *argv[])
                 continue;
             }
             if( errno == EINTR ) continue;
-            std::cerr << "recv:" << strerror(errno) << std::endl;
+            cerror("recv");
             std::exit(EXIT_FAILURE);
         }
         if( msg_buf != recv_buf )
@@ -105,3 +100,24 @@ int main(int argc, char *argv[])
         close(sock);
     }
 }
+
+int main(int argc, char *argv[])
+{
+    if( argc <= 4 )
+    {
+        std::cerr << "Usage: client [server addr] [msg size] [count] [thread]" << std::endl;
+        return EXIT_FAILURE;
+    }
+    
+    std::string server_addr(argv[1]);
+    int msg_size = std::atoi(argv[2]);
+    std::atomic_int count(std::atoi(argv[3]));
+    int nthreads = std::atoi(argv[4]);
+
+    std::vector<std::thread> threads;
+    threads.reserve(nthreads);
+    for( int i = 0; i < nthreads; ++i )
+        threads.push_back(std::thread(send_recv, server_addr, msg_size, std::ref(count)));
+    std::for_each(threads.begin(), threads.end(), std::mem_fn(&std::thread::join));
+}
+

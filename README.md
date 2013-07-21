@@ -32,6 +32,6 @@ On server:
 
 On Client:
 
-    ./client <server addr> <message size> <test count>
+    ./client <server addr> <message size> <test count> <threads>
 
-for example, `./client 192.168.1.1 1024 100` sends random packets of 1024 bytes 100 times.
+for example, `./client 192.168.1.1 1024 1000 8` sends random packets of 1024 bytes 1000 times in 8 threads.

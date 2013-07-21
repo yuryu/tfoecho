@@ -9,13 +9,17 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <netinet/tcp.h>
 #include <netdb.h>
 
 #define DEFAULT_PORT "32345"
 #define TFO_QLEN 128
 #define LISTEN_QLEN 128
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
+#define MAX_EVENTS 32
+
+#include "common.h"
 
 int open_socket(const std::string &port)
 {
@@ -36,7 +40,7 @@ int open_socket(const std::string &port)
     struct addrinfo *rp;
     for( rp = res; rp != NULL; rp = rp->ai_next )
     {
-        sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        sock = socket(rp->ai_family, rp->ai_socktype | SOCK_NONBLOCK, rp->ai_protocol);
         if( sock == -1 ) continue;
         if( bind(sock, rp->ai_addr, rp->ai_addrlen) == 0 ) break;
         close(sock);
@@ -54,49 +58,116 @@ int open_socket(const std::string &port)
     if( e == -1 )
     {
         close(sock);
-        std::cerr << "setsockopt:" << strerror(errno) << std::endl;
+        cerror("setsockopt");
         std::exit(EXIT_FAILURE);
     }
     if( listen(sock, LISTEN_QLEN) == -1 )
     {
         close(sock);
-        std::cerr << "listen:" << strerror(errno) << std::endl;
+        cerror("listen");
         std::exit(EXIT_FAILURE);
     }
     return sock;
 }
 
-void server(const std::string &port)
+int accept_and_register(int sfd, int epollfd)
 {
-    int sfd = open_socket(port);
-    std::vector<char> buf(BUFFER_SIZE);
-
-    while( 1 )
+    // Accept a new connection
+    struct sockaddr addr;
+    socklen_t addrlen = sizeof(addr);
+    int s;
+    do
     {
-        struct sockaddr addr;
-        socklen_t addrlen = sizeof(addr);
-        int s = accept(sfd, &addr, &addrlen);
+        s = accept4(sfd, &addr, &addrlen, SOCK_NONBLOCK);
         if( s == -1 )
         {
             if( errno == EINTR ) continue;
-            close(sfd);
-            std::cerr << "accept:" << strerror(errno) << std::endl;
+            cerror("accept");
             std::exit(EXIT_FAILURE);
         }
-        ssize_t rs;
-        while( (rs = recv(s, &buf[0], buf.size(), 0)) != 0 )
-        {
-            if( rs == -1 )
-            {
-                if( errno == EINTR ) continue;
-                std::cerr << "recv:" << strerror(errno) << std::endl;
-                break;
-            }
-            send(s, &buf[0], rs, 0);
-        }
-        close(s);
+    } while( 0 );
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = s;
+    if( epoll_ctl(epollfd, EPOLL_CTL_ADD, s, &ev) == -1 )
+    {
+        perror("epoll_ctl: EPOLL_CTL_ADD");
+        std::exit(EXIT_FAILURE);
     }
-    close(sfd);
+    return s;
+}
+
+void process_client_socket(int s, int epollfd)
+{
+    static std::vector<char> buf(BUFFER_SIZE);
+    ssize_t rs;
+    while( (rs = recv(s, &buf[0], buf.size(), 0)) != 0 )
+    {
+        if( rs == -1 )
+        {
+            if( errno == EINTR ) continue;
+            if( errno == EAGAIN || errno == EWOULDBLOCK ) return;
+            cerror("recv");
+            break;
+        }
+        do {
+            if( send(s, &buf[0], rs, 0) == -1 )
+            {
+                // EAGAIN or EWOULDBLOCK is retuned when the socket buffer is full
+                // We should try with another socket for maximum performance, however,
+                // we just wait until the buffer becomes available as we don't have
+                // enough buffer for that.
+                if( errno == EINTR || 
+                        errno == EAGAIN || errno == EWOULDBLOCK ) continue;
+                cerror("send");
+                goto close_socket;
+            }
+        } while( 0 );
+    }
+close_socket:
+    if( epoll_ctl(epollfd, EPOLL_CTL_DEL, s, NULL) == -1 )
+        cerror("epoll_ctl: EPOLL_CTL_DEL");
+    close(s);
+}
+
+void server(const std::string &port)
+{
+    FD sfd(open_socket(port));
+    
+    struct epoll_event ev, events[MAX_EVENTS];
+
+    FD epollfd(epoll_create1(0));
+    if( epollfd == -1 )
+    {
+        cerror("epoll_create1");
+        std::exit(EXIT_FAILURE);
+    }
+    ev.events = EPOLLIN;
+    ev.data.fd = sfd;
+    if( epoll_ctl(epollfd, EPOLL_CTL_ADD, sfd, &ev) == -1 )
+    {
+        perror("epoll_ctl: EPOLL_CTL_ADD");
+        std::exit(EXIT_FAILURE);
+    }
+
+    while( 1 )
+    {
+        const int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+        if( nfds == -1 )
+        {
+            if( errno == EINTR ) continue;
+            cerror("epoll_wait");
+            std::exit(EXIT_FAILURE);
+        }
+
+        for( int i = 0; i < nfds; ++i )
+        {
+            if( events[i].data.fd == sfd )
+                accept_and_register(sfd, epollfd);
+            else
+                process_client_socket(events[i].data.fd, epollfd);
+        }
+    }
 }
 
 int main(int argc, char *argv[])

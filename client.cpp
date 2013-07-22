@@ -37,7 +37,7 @@ int getsock(const std::string &server_addr, const std::vector<char> &msg_to_send
     }
     int sock;
     struct addrinfo *rp; 
-    for( rp = res; rp != NULL; rp = rp->ai_next )
+    for( rp = res; rp != nullptr; rp = rp->ai_next )
     {
         // Need to create the socket again when EINTR is returned
 redo:
@@ -75,7 +75,7 @@ redo:
         close(sock);
     }
     freeaddrinfo(res);
-    if( rp == NULL )
+    if( rp == nullptr )
     {
         std::cerr << "Couldn't get a socket." << std::endl;
         std::exit(EXIT_FAILURE);

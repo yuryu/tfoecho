@@ -29,7 +29,7 @@ int open_socket(const std::string &port)
     hint.ai_family = AF_UNSPEC;
     hint.ai_socktype = SOCK_STREAM;
     hint.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
-    int e = getaddrinfo(NULL, port.c_str(), &hint, &res);
+    int e = getaddrinfo(nullptr, port.c_str(), &hint, &res);
     if( e != 0 )
     {
         std::cerr << "getaddrinfo: " << gai_strerror(e) << std::endl;
@@ -38,14 +38,14 @@ int open_socket(const std::string &port)
     
     int sock;
     struct addrinfo *rp;
-    for( rp = res; rp != NULL; rp = rp->ai_next )
+    for( rp = res; rp != nullptr; rp = rp->ai_next )
     {
         sock = socket(rp->ai_family, rp->ai_socktype | SOCK_NONBLOCK, rp->ai_protocol);
         if( sock == -1 ) continue;
         if( bind(sock, rp->ai_addr, rp->ai_addrlen) == 0 ) break;
         close(sock);
     }
-    if( rp == NULL )
+    if( rp == nullptr )
     {
         std::cerr << "Couldn't bind." << std::endl;
         std::exit(EXIT_FAILURE);
@@ -125,7 +125,7 @@ void process_client_socket(int s, int epollfd)
             break;
         }
     }
-    if( epoll_ctl(epollfd, EPOLL_CTL_DEL, s, NULL) == -1 )
+    if( epoll_ctl(epollfd, EPOLL_CTL_DEL, s, nullptr) == -1 )
         cerror("epoll_ctl: EPOLL_CTL_DEL");
     close(s);
 }

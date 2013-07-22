@@ -11,12 +11,11 @@ For more details, read an LWN article: http://lwn.net/Articles/508865/
 ## Requirements
 
 - Linux 3.7 or later
-- C++11 compliant compiler
+- C++11 compliant compiler (confirmed with GCC 4.8.1)
 
 ## Build
 
-    g++ -o server -std=c++11 server.cpp
-    g++ -o client -std=c++11 client.cpp
+    make
 
 ## Run
 
